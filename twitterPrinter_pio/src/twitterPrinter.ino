@@ -69,21 +69,15 @@ char statusTopic[64];
 
 /////////////////////////   Other   /////////////////////////
 
+const bool FLIPPED_PRINTING = true;
+
 SoftwareSerial mySerial;
 const int PRINTER_RX = D5;
 const int PRINTER_TX = D6;
 Adafruit_Thermal printer(&mySerial);     // Pass addr to printer constructor
 
-
-// initialize the library instance:
-WiFiClient client;
-const unsigned long requestInterval = 60000;  // delay between requests
-char serverName[] = "api.twitter.com";  // twitter URL
-boolean requested;                   // whether you've made a request since connecting
-unsigned long lastAttemptTime = 0;            // last time you connected to the server, in milliseconds
-String currentLine = "";            // string to hold the text from server
-String tweet = "";                  // string to hold the tweet
-boolean readingTweet = false;       // if you're currently reading the tweet
+const char upsideOn[] = { 27, 123, 1, 0};
+const char upsideOff[] = { 27, 123, 0, 0};
 
 
 void setup() {
@@ -98,12 +92,16 @@ void setup() {
 
 	//Serial1.begin(19200); // Use this instead if using hardware serial
 	printer.begin();        // Init printer (same regardless of serial type)
-
+	
 	/////////////////////////   IO init   /////////////////////////
 
 
 	// Set text justification (right, center, left) -- accepts 'L', 'C', 'R'
 	printer.wake();
+
+
+	if(FLIPPED_PRINTING){mySerial.write(upsideOn, 4);}
+
 	printer.feed(2);
 	printer.justify('C');
 	printer.println("Starting Up Please Wait...");
@@ -118,16 +116,13 @@ void setup() {
 	configPage.fillConfig(&config);
 	configPage.begin(config.hostname);
 	server.on("/", HTTP_GET, handleStatus);
-	// server.on("/somePath", HTTP_POST, handleSomeTask);
+	server.on("/topicUpdate", HTTP_POST, handleTopicUpdate);
 
 	//UNCOMMENT THIS LINE TO ENABLE MQTT CALLBACK
 	myESP.setCallback(callback);
 	myESP.addSubscription(topic);
 
 	server.begin();                            // Actually start the server
-
-	currentLine.reserve(256);
-  	tweet.reserve(150);
 	
 
 	// Set text justification (right, center, left) -- accepts 'L', 'C', 'R'
@@ -199,11 +194,16 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
 -----------------";
 char* footer = "------------------";
 
-	thermalPrint(header, strlen(header), 2);
-
-	thermalPrint(newPayload, length, 2);
-
-	thermalPrint(footer, strlen(footer), 3);
+	if(FLIPPED_PRINTING == true){
+		thermalPrint(footer, strlen(footer), 2);
+		thermalPrint(newPayload, length, 2);
+		thermalPrint(header, strlen(header), 3);
+	}	
+	else{
+		thermalPrint(header, strlen(header), 2);
+		thermalPrint(newPayload, length, 2);
+		thermalPrint(footer, strlen(footer), 3);
+	}	
 }
 
 
