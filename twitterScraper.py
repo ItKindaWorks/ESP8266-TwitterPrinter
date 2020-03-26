@@ -1,12 +1,24 @@
 from __future__ import print_function
-import time
-import json
-import sys
-import random
-
 import twitter
 import paho.mqtt.client as mqtt
+
+import json
+import sys
+import os
+from datetime import datetime, timezone
+
+import random
 from unidecode import unidecode
+
+import textwrap
+
+scriptPath = os.path.dirname(os.path.realpath(__file__)) + '/'
+
+
+
+#set ths to true to have the order of lines reversed. This value should match the one found in
+#the .ino project file.
+FLIPPED_PRINTING = True
 
 
 
@@ -47,7 +59,11 @@ TAGS_FILE = "twitterTags.txt"
 
 
 
+#convert utc to local datetime
+def utc_to_local(utc_dt):
+    return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
 
+#read and parse the tags file
 def readFile(filename):
 	fp = open(filename,'r')
 	tags = []
@@ -55,7 +71,6 @@ def readFile(filename):
 		tags += [line.strip()]
 	fp.close()
 	return tags
-
 
 
 def main():
@@ -68,8 +83,8 @@ def main():
 	#grab a hashtag from the tags file
 	tags = readFile(TAGS_FILE)
 	tag = tags[random.randrange(len(tags))]
-	# print(tag)
 	
+	#generate the proper query depending on hashtag or @user
 	query = ''
 	if tag[0] == '#':
 		query = 'q=-filter%3Aretweets%23' + tag[1:]
@@ -89,18 +104,36 @@ def main():
 	name = unidecode(dictVersion["user"]["name"])
 	date = unidecode(dictVersion["created_at"])
 
-	# print(dictVersion["created_at"])
-	# print(dictVersion["user"]["name"])
-	# print(text)
-
+	#convert the timestamp to local time (comment these two lines to use utc)
+	timeVal = utc_to_local(datetime.strptime(date, "%a %b %d %H:%M:%S %z %Y"))
+	date = datetime.strftime(timeVal, "%a %b %d %H:%M:%S %Z %Y")
 	
 
+	#generate the wrapped text
+	text = textwrap.fill(text, width=31)
+
+	#if the text should be flipped for printing 
+	#(last line first) then do that now
+	if(FLIPPED_PRINTING == True):
+		lineList = text.split('\n')
+		lineList.reverse()
+		text = '\n'.join(lineList)
+
+
+	#uncomment me to test without mqtt
+	# exit()
+	
+	#connect to mqtt and send the tweet
 	mqttClient = mqtt.Client()
 	mqttClient.username_pw_set(MQTT_USER, MQTT_PASS)
 	mqttClient.connect(MQTT_HOST, MQTT_PORT, 60)
-	mqttClient.publish(MQTT_TOPIC, "user: "+ name + '\n' + date + '\n\n' + text)
-	
 
+	#handle mqtt differently depending on whether the text should be revered or not
+	if(FLIPPED_PRINTING == True):
+		mqttClient.publish(MQTT_TOPIC,  text + '\n\n' + date +"\nUser: "+ name)
+	else:
+		mqttClient.publish(MQTT_TOPIC, "User: "+ name + '\n' + date + '\n\n' + text)
+	
 
 
 
@@ -113,5 +146,3 @@ if __name__ == '__main__':
 
 	else:
 		main()
-
-
