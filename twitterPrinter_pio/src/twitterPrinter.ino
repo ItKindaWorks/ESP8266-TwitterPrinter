@@ -17,7 +17,7 @@
 */
 #include "ESPHelper_base.h"
 #include "Adafruit_Thermal.h"
-
+#include "qrcode.h"
 #include <SoftwareSerial.h>
 
 
@@ -83,31 +83,24 @@ const char upsideOff[] = { 27, 123, 0, 0};
 void setup() {
 	Serial.begin(115200);
 	delay(500);
-	// This line is for compatibility with the Adafruit IotP project pack
 
-	// NOTE: SOME PRINTERS NEED 9600 BAUD instead of 19200, check test page.
-	mySerial.begin(19200, SWSERIAL_8N1, PRINTER_RX, PRINTER_TX, false, 95, 11);
-
-	delay(500);
-
-	//Serial1.begin(19200); // Use this instead if using hardware serial
-	printer.begin();        // Init printer (same regardless of serial type)
 	
 	/////////////////////////   IO init   /////////////////////////
 
+	mySerial.begin(19200, SWSERIAL_8N1, PRINTER_RX, PRINTER_TX, false, 95, 11);
+	delay(500);
+	printer.begin();        // Init printer (same regardless of serial type)
 
-	// Set text justification (right, center, left) -- accepts 'L', 'C', 'R'
+
+	defaultPrintSettings();
 	printer.wake();
-
-
-	if(FLIPPED_PRINTING){mySerial.write(upsideOn, 4);}
-
 	printer.feed(2);
-	printer.justify('C');
 	printer.println("Starting Up Please Wait...");
 	printer.feed(2);
-	printer.justify('L');
 	printer.sleep();      // Tell printer to sleep
+
+	
+
 	/////////////////////////   Network Init   /////////////////////////
 
 	//startup the wifi and web server
@@ -124,14 +117,18 @@ void setup() {
 
 	server.begin();                            // Actually start the server
 	
+	printer.wake();
+	if(FLIPPED_PRINTING){mySerial.write(upsideOff, 4);}
+	printQR("https://youtube.com/itkindaworks");
+	defaultPrintSettings();
+	printer.sleep();
 
 	// Set text justification (right, center, left) -- accepts 'L', 'C', 'R'
 	printer.wake();
-	printer.justify('C');
 	printer.println("Booting Finished");
 	printer.feed(2);
-	printer.justify('L');
 	printer.sleep();      // Tell printer to sleep
+
 }
 
 void loop(){
@@ -158,6 +155,12 @@ void loop(){
 				}
 				Serial.print("Connected to network with IP: ");
 				Serial.println(myESP.getIP());
+				printer.wake();
+				printer.println(myESP.getIP());
+				printer.println("Connected to network with IP: ");
+				printer.feed(2);
+				printer.sleep();      // Tell printer to sleep
+
 				justReconnected = false;
 			}
 
@@ -184,28 +187,96 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
 	newPayload[length] = '\0';
 	String payloadStr = newPayload;
 
-	printer.wake();
-	printer.justify('C');
-	printer.sleep();
+	defaultPrintSettings();
 
 	char* header = "\
-------------------\n\
---- New Tweet ---\n\
------------------";
-char* footer = "------------------";
+-----------------------\n\
+------ New Tweet ------\n\
+-----------------------";
+char* footer = "-----------------------";
 
 	if(FLIPPED_PRINTING == true){
 		thermalPrint(footer, strlen(footer), 2);
+		printBarcodeLink(payloadStr);
 		thermalPrint(newPayload, length, 2);
 		thermalPrint(header, strlen(header), 3);
 	}	
 	else{
 		thermalPrint(header, strlen(header), 2);
 		thermalPrint(newPayload, length, 2);
+		printBarcodeLink(payloadStr);
 		thermalPrint(footer, strlen(footer), 3);
 	}	
 }
 
+
+void printBarcodeLink(String inStr){
+	int index = -1;
+
+	if(FLIPPED_PRINTING == false){index =inStr.lastIndexOf("https://t.co/");}
+	else{index =inStr.indexOf("https://t.co/");}
+
+	String link = inStr.substring(index, index+23);
+	
+	if(index == -1){return;}
+	else{
+		printer.wake();
+		if(FLIPPED_PRINTING){mySerial.write(upsideOff, 4);}
+		printQR(link);
+		defaultPrintSettings();
+		printer.sleep();
+	}
+}
+
+void printQR(String text){
+	printer.wake();
+	printer.justify('C');
+	printer.setCharSpacing(0);
+	mySerial.write(27);
+	mySerial.write(51);
+	mySerial.write((byte)0);
+	printer.feed(1);
+
+	// Create the QR code
+	Serial.println("Generating QR Code");
+	QRCode qrcode;
+	uint8_t qrcodeData[qrcode_getBufferSize(3)];
+	qrcode_initText(&qrcode, qrcodeData, 3, 0, text.c_str());
+	Serial.println("printing QR Code\n\n");
+
+	//print the code
+	if(FLIPPED_PRINTING == false){
+		for (int x = 0; x < qrcode.size; x+=2) {
+			for (int y = 0; y < qrcode.size; y++) {
+					if (qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(219);}
+					else if (!qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(220);}
+					else if (qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(223);}
+					else if (!qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x+1, y)) {mySerial.print(" ");}
+			}
+			printer.feed(1);
+		}
+	}
+	else{
+		for (int x = qrcode.size; x >0; x-=2) {
+			for (int y = 0; y < qrcode.size; y++) {
+					if (qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x-1, y)) 	{mySerial.write(219);}
+					else if (!qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x-1, y)) 	{mySerial.write(220);}
+					else if (qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x-1, y)) 	{mySerial.write(223);}
+					else if (!qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x-1, y)) {mySerial.print(" ");}
+			}
+			printer.feed(1);
+		}
+	}
+}
+
+void defaultPrintSettings(){
+	printer.wake();
+	printer.setDefault();
+	if(FLIPPED_PRINTING){mySerial.write(upsideOn, 4);}
+	printer.justify('C');
+	printer.feed(1);
+	printer.sleep();
+}
 
 void thermalPrint(char* text, int len, int linebreaksCount){
 	printer.wake();
