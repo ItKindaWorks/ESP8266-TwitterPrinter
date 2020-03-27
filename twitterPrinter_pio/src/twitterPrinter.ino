@@ -69,7 +69,8 @@ char statusTopic[64];
 
 /////////////////////////   Other   /////////////////////////
 
-const bool FLIPPED_PRINTING = true;
+bool flippedPrinting = true;
+bool printQRLinks = true;
 
 SoftwareSerial mySerial;
 const int PRINTER_RX = D5;
@@ -91,15 +92,10 @@ void setup() {
 	delay(500);
 	printer.begin();        // Init printer (same regardless of serial type)
 
-
-	defaultPrintSettings();
 	printer.wake();
 	printer.feed(2);
-	printer.println("Starting Up Please Wait...");
-	printer.feed(2);
-	printer.sleep();      // Tell printer to sleep
+	basicPrint("Starting Up Please Wait...", 2, true);
 
-	
 
 	/////////////////////////   Network Init   /////////////////////////
 
@@ -110,6 +106,8 @@ void setup() {
 	configPage.begin(config.hostname);
 	server.on("/", HTTP_GET, handleStatus);
 	server.on("/topicUpdate", HTTP_POST, handleTopicUpdate);
+	server.on("/toggleFlipPrint", HTTP_POST, handleToggleFlipPrint);
+	server.on("/toggleQRLinks", HTTP_POST, handleToggleQRLink);
 
 	//UNCOMMENT THIS LINE TO ENABLE MQTT CALLBACK
 	myESP.setCallback(callback);
@@ -117,17 +115,15 @@ void setup() {
 
 	server.begin();                            // Actually start the server
 	
+	//print a little signature ;)
 	printer.wake();
-	if(FLIPPED_PRINTING){mySerial.write(upsideOff, 4);}
+	if(flippedPrinting){mySerial.write(upsideOff, 4);}
 	printQR("https://youtube.com/itkindaworks");
 	defaultPrintSettings();
 	printer.sleep();
 
-	// Set text justification (right, center, left) -- accepts 'L', 'C', 'R'
-	printer.wake();
-	printer.println("Booting Finished");
-	printer.feed(2);
-	printer.sleep();      // Tell printer to sleep
+
+	basicPrint("Booting Finished", 2, true);
 
 }
 
@@ -155,11 +151,15 @@ void loop(){
 				}
 				Serial.print("Connected to network with IP: ");
 				Serial.println(myESP.getIP());
-				printer.wake();
-				printer.println(myESP.getIP());
-				printer.println("Connected to network with IP: ");
-				printer.feed(2);
-				printer.sleep();      // Tell printer to sleep
+
+				if(flippedPrinting == true){
+					basicPrint(myESP.getIP().c_str(), 0, true);
+					basicPrint("Connected to network with IP: ", 2, true);
+				}
+				else{
+					basicPrint("Connected to network with IP: ", 0, true);
+					basicPrint(myESP.getIP().c_str(), 2, true);
+				}
 
 				justReconnected = false;
 			}
@@ -173,7 +173,13 @@ void loop(){
 
 }
 
-//MQTT callback
+/**
+ * @brief mqtt callback function
+ * 
+ * @param topic 	topic string
+ * @param payload 	payload string (NOT NULL TERMINATED)
+ * @param length 	length of the payload
+ */
 void callback(char* topic, uint8_t* payload, unsigned int length) {
 	//convert topic to string to make it easier to work with if complex
 	//comparisons are needed.
@@ -187,15 +193,19 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
 	newPayload[length] = '\0';
 	String payloadStr = newPayload;
 
+	//make sure the printer is defaulted
 	defaultPrintSettings();
 
-	char* header = "\
+//header and footer strings
+char* header = "\
 -----------------------\n\
 ------ New Tweet ------\n\
 -----------------------";
 char* footer = "-----------------------";
 
-	if(FLIPPED_PRINTING == true){
+	//invert the order things are printed in if the
+	//text is to be printed in reverse order
+	if(flippedPrinting == true){
 		thermalPrint(footer, strlen(footer), 2);
 		printBarcodeLink(payloadStr);
 		thermalPrint(newPayload, length, 2);
@@ -209,32 +219,70 @@ char* footer = "-----------------------";
 	}	
 }
 
-
-void printBarcodeLink(String inStr){
-	int index = -1;
-
-	if(FLIPPED_PRINTING == false){index =inStr.lastIndexOf("https://t.co/");}
-	else{index =inStr.indexOf("https://t.co/");}
-
-	String link = inStr.substring(index, index+23);
-	
-	if(index == -1){return;}
-	else{
-		printer.wake();
-		if(FLIPPED_PRINTING){mySerial.write(upsideOff, 4);}
-		printQR(link);
-		defaultPrintSettings();
-		printer.sleep();
-	}
+/**
+ * @brief basic thermal print function
+ * 
+ * @param inStr string to be printed
+ * @param feedCount number of line feeds after printed text
+ * @param defaultFmt should we use the default formatting options
+ */
+void basicPrint(const char* inStr, int feedCount, bool defaultFmt){
+	printer.wake();
+	if(defaultFmt){defaultPrintSettings();}
+	printer.println(inStr);
+	printer.feed(feedCount);
+	printer.sleep();      // Tell printer to sleep
 }
 
+/**
+ * @brief search for and print a qr code to the last twitter t.co/... link in a tweet (usually a subtweet, picture, or link to article)
+ * 
+ * @param inStr tweet string to search for a link to convert to a qr code
+ */
+void printBarcodeLink(String inStr){
+
+	//find the index of the last link
+	int index = -1;
+	if(flippedPrinting == false){index =inStr.lastIndexOf("https://t.co/");}	
+	else{index =inStr.indexOf("https://t.co/");}	//flipped printing requires searching from the "start" of the string (the end of the tweet)
+
+	//if nothing was found, end
+	if(index == -1){return;}
+
+	//generate a link only string
+	String link = inStr.substring(index, index+23);
+	
+	//wake the printer and prep for printing
+	printer.wake();
+	if(flippedPrinting){mySerial.write(upsideOff, 4);}
+
+	//print out the qr code
+	printQR(link);
+
+	//reset the printer back to default settings and sleep
+	defaultPrintSettings();
+	printer.sleep();
+	
+}
+
+/**
+ * @brief print a qr code based on a string
+ * 
+ * @param text piece of text to be converted into a qr code
+ */
 void printQR(String text){
+
+	//wake the printer and setup formatting
 	printer.wake();
 	printer.justify('C');
 	printer.setCharSpacing(0);
+
+	//set zero line spacing
 	mySerial.write(27);
 	mySerial.write(51);
 	mySerial.write((byte)0);
+	
+	//print an extra line feed for spacing
 	printer.feed(1);
 
 	// Create the QR code
@@ -242,13 +290,20 @@ void printQR(String text){
 	QRCode qrcode;
 	uint8_t qrcodeData[qrcode_getBufferSize(3)];
 	qrcode_initText(&qrcode, qrcodeData, 3, 0, text.c_str());
+	
+
+	//print the code 
 	Serial.println("printing QR Code\n\n");
 
-	//print the code
-	if(FLIPPED_PRINTING == false){
-		for (int x = 0; x < qrcode.size; x+=2) {
+	if(flippedPrinting == false){	//handle regular (right side up) printing of the code
+
+		for (int x = 0; x < qrcode.size; x+=2) {	//x+=2 because each printed character represents 2 lines of the qr code
 			for (int y = 0; y < qrcode.size; y++) {
-					if (qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(219);}
+
+					//since each printed char represents 2 lines of the qr code, we have to make sure to print the right character
+					//so each of these if statements looks at the qr 'bit' on the current line and the next line of the qr code
+					//and figures out which char needs to be printed. 
+ 					if (qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(219);}
 					else if (!qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(220);}
 					else if (qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x+1, y)) 	{mySerial.write(223);}
 					else if (!qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x+1, y)) {mySerial.print(" ");}
@@ -257,8 +312,10 @@ void printQR(String text){
 		}
 	}
 	else{
-		for (int x = qrcode.size; x >0; x-=2) {
+		//when printing upside down we have to start from the bottom of the code and work upwards which is why x starts at qrcode.size
+		for (int x = qrcode.size; x >0; x-=2) {		//x-=2 because each printed character represents 2 lines of the qr code
 			for (int y = 0; y < qrcode.size; y++) {
+					//see note above - this is the same but opposite
 					if (qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x-1, y)) 	{mySerial.write(219);}
 					else if (!qrcode_getModule(&qrcode, x, y) && qrcode_getModule(&qrcode, x-1, y)) 	{mySerial.write(220);}
 					else if (qrcode_getModule(&qrcode, x, y) && !qrcode_getModule(&qrcode, x-1, y)) 	{mySerial.write(223);}
@@ -267,18 +324,32 @@ void printQR(String text){
 			printer.feed(1);
 		}
 	}
+
+	//turn the printer off when done
+	printer.sleep();
 }
 
+/**
+ * @brief sets the printer back to the expected default formatting
+ * 
+ */
 void defaultPrintSettings(){
 	printer.wake();
 	printer.setDefault();
-	if(FLIPPED_PRINTING){mySerial.write(upsideOn, 4);}
+	if(flippedPrinting){mySerial.write(upsideOn, 4);}
 	printer.justify('C');
 	printer.feed(1);
 	printer.sleep();
 }
 
-void thermalPrint(char* text, int len, int linebreaksCount){
+/**
+ * @brief print text using word wrapping
+ * 
+ * @param text ptr to string to be printed
+ * @param len size of the string
+ * @param linebreaksCount number of breaks to insert after the printed text
+ */
+void thermalPrint(char* text, int len, int linebreakCount){
 	printer.wake();
 
 
@@ -304,28 +375,43 @@ void thermalPrint(char* text, int len, int linebreaksCount){
 		}
 	}
 
-	printer.feed(linebreaksCount);
+	printer.feed(linebreakCount);
 	printer.sleep();
 }
 
+/**
+ * @brief figures out whether a string needs to wrap to the next line to keep from breaking up words
+ * 
+ * @param text string to check (should generally be used with a given str index, ie &text[i] ) 
+ * @param len total length of the string
+ * @param charsLeft characters left in the line
+ * @param lineLen total line length
+ * @return true if we need to insert a newline now
+ * @return false if no newline is needed at the moment
+ */
 bool shouldNewline(char* text, int len, int charsLeft, int lineLen){
 	if (len < charsLeft){return false;}
 
 	//search for newline or space
 	for(int i = 0; i < charsLeft; i++){
 		if(text[i] == '\n' || text[i] == ' '){
+			//if we find a newline/space before the end of the line, then we dont need a newline
+			//manually inserted now
 			return false;
 		}
 	}
 
-	//check length of word
+	//find length of word 
 	int wordSize = 0;
 	for(int i = 0; i < len; i++){
 		if(text[i] == '\n' || text[i] == ' '){break;}
 		wordSize++;
 	}
 
+	//if the word is longer than a line, ignore the newline and just let the printer wrap it
 	if(wordSize > lineLen){return false;}
+
+	//otherwise, if we have gotten here then yes we do need to insert a newline now
 	else{return true;}
 }
 
@@ -425,5 +511,12 @@ void handleTopicUpdate() {
 
 }
 
+void handleToggleFlipPrint(){
 
 
+}
+
+void handleToggleQRLink(){
+
+	
+}
