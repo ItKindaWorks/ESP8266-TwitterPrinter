@@ -2,6 +2,7 @@ from __future__ import print_function
 import twitter
 import paho.mqtt.client as mqtt
 
+import time
 import json
 import sys
 import os
@@ -34,7 +35,6 @@ LOOP_SLEEP_SECONDS = 3600
 
 
 #Twitter developer api keys (set these according to your own api keys)
-
 CONSUMER_KEY=		'***********************'
 CONSUMER_SECRET=	'***********************'
 ACCESS_TOKEN_KEY=	'***********************'
@@ -51,10 +51,7 @@ MQTT_PASS = '' #optional
 MQTT_PORT = 1883
 MQTT_TOPIC = '/your/mqtt/topic'
 
-TAGS_FILE = "twitterTags.txt"
-
-
-
+TAGS_FILE = scriptPath + "twitterTags.txt"
 
 
 
@@ -92,8 +89,18 @@ def main():
 		query = 'q=from%3A' + tag[1:]
 
 
-	#grab a tweet from the api
-	timeline = api.GetSearch(raw_query=query + "%20&result_type=recent&count=1&tweet_mode=extended")
+	attemptsLeft = 3
+	timeline = []
+	while(len(timeline) == 0 and attemptsLeft > 0):
+		#grab a tweet from the api
+		timeline = api.GetSearch(raw_query=query + "%20&result_type=recent&lang=en&count=1&tweet_mode=extended")
+		if(len(timeline) == 0):
+			print("twitter search failed - trying again in 5 seconds")
+			time.sleep(5)
+
+	if(len(timeline) == 0):
+		return
+
 	dictVersion = timeline[0].AsDict()
 
 
