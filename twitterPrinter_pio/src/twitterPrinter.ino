@@ -19,6 +19,7 @@
 #include "Adafruit_Thermal.h"
 #include "qrcode.h"
 #include <SoftwareSerial.h>
+#include <Bounce2.h>
 
 
 #define AFFIRM_REQ(SUB_TEXT, SUB_DATA) String("<html>\
@@ -44,6 +45,8 @@ const String INVALID_REQUEST_STR = String("<html>\
 
 /////////////////////////   Pin Definitions   /////////////////////////
 
+const int buttonPin = D2;
+Bounce pushbutton = Bounce(buttonPin, 10);  // 10 ms debounce
 
 
 /////////////////////////   Networking   /////////////////////////
@@ -96,6 +99,7 @@ void setup() {
 	printer.feed(2);
 	basicPrint("Starting Up Please Wait...", 2, true);
 
+    pinMode(buttonPin, INPUT_PULLUP);
 
 	/////////////////////////   Network Init   /////////////////////////
 
@@ -106,12 +110,13 @@ void setup() {
 	configPage.begin(config.hostname);
 	server.on("/", HTTP_GET, handleStatus);
 	server.on("/topicUpdate", HTTP_POST, handleTopicUpdate);
-	server.on("/toggleFlipPrint", HTTP_POST, handleToggleFlipPrint);
-	server.on("/toggleQRLinks", HTTP_POST, handleToggleQRLink);
+	server.on("/flippedPrinting", HTTP_POST, handleToggleFlipPrint);
+	server.on("/printQRLinks", HTTP_POST, handleToggleQRLink);
 
 	//UNCOMMENT THIS LINE TO ENABLE MQTT CALLBACK
 	myESP.setCallback(callback);
 	myESP.addSubscription(topic);
+	myESP.addSubscription("/home/devicePing");
 
 	server.begin();                            // Actually start the server
 	
@@ -142,6 +147,13 @@ void loop(){
 
 			if(espHelperStatus == FULL_CONNECTION){
 				//full connection loop code here
+                if(pushbutton.update()){
+					if (pushbutton.risingEdge()) {
+						String outTopic = String(topic);
+					outTopic += "/signal";
+					myESP.publish(outTopic.c_str(), "1");
+					}
+				}
 			}
 
 			if(justReconnected){
@@ -193,6 +205,11 @@ void callback(char* topic, uint8_t* payload, unsigned int length) {
 	newPayload[length] = '\0';
 	String payloadStr = newPayload;
 
+	if(topicStr.equals("/home/devicePing")){
+		postDevicePing();
+		return;
+	}
+
 	//make sure the printer is defaulted
 	defaultPrintSettings();
 
@@ -207,14 +224,14 @@ char* footer = "-----------------------";
 	//text is to be printed in reverse order
 	if(flippedPrinting == true){
 		thermalPrint(footer, strlen(footer), 2);
-		printBarcodeLink(payloadStr);
+		if(printQRLinks){printBarcodeLink(payloadStr);}
 		thermalPrint(newPayload, length, 2);
 		thermalPrint(header, strlen(header), 3);
 	}	
 	else{
 		thermalPrint(header, strlen(header), 2);
 		thermalPrint(newPayload, length, 2);
-		printBarcodeLink(payloadStr);
+		if(printQRLinks){printBarcodeLink(payloadStr);}
 		thermalPrint(footer, strlen(footer), 3);
 	}	
 }
@@ -431,8 +448,17 @@ void loadOtherCfg(){
 	tempTopic.toCharArray(statusTopic, sizeof(statusTopic));
 
 
-	// loadKey("Key", file, someFloat);
-	// loadKey("thingUser", file, someStr, sizeof(someStr));
+	int inverted = 0;
+	int qrCode = 0;
+
+	loadKey("flippedPrinting", file, &inverted);
+	loadKey("printQRLinks", file, &qrCode);
+	
+	if(inverted){flippedPrinting = true;}
+	else{flippedPrinting = false;}
+
+	if(qrCode){printQRLinks = true;}
+	else{printQRLinks = false;}
 
 	ESPHelperFS::end();
 }
@@ -468,6 +494,22 @@ void handleStatus() {
 	<form action=\"/topicUpdate\" method=\"POST\">\
 	Update Topic: <input type=\"text\" name=\"topic\" size=\"64\" value=\"" + String (topic) + "\"></br>\
 	<input type=\"submit\" value=\"Submit\"></form>\
+  \
+  \
+  </br>\
+  </br>\
+  \
+  \
+  	<form action=\"/printQRLinks\" method=\"POST\">\
+	Print QR Code: " + String(printQRLinks ? "Enabled" : "Disabled") + " <input type=\"submit\" value=\"Toggle QR Printing\"></form>\
+  \
+  \
+  </br>\
+  </br>\
+  \
+  \
+  	<form action=\"/flippedPrinting\" method=\"POST\">\
+	Flipped text printing: " + String(flippedPrinting ? "Enabled" : "Disabled") + " <input type=\"submit\" value=\"Toggle Flipped Printing\"></form>\
   \
   \
   </html>"));
@@ -512,11 +554,31 @@ void handleTopicUpdate() {
 }
 
 void handleToggleFlipPrint(){
+	const char* keyName = "flippedPrinting";
 
+	//Remember to change this to whatever file you want to store/read your custom config from
+	const char* file = "/config.json";
 
+	flippedPrinting = !flippedPrinting;
+
+	//save the key to flash and refresh data var with data from flash
+	addKey(keyName, flippedPrinting ? (char*)"1" : (char*)"0" , file);
+
+	//tell the user that the config is loaded in and the module is restarting
+	server.send(200, "text/html",AFFIRM_REQ("Flipped printing has been ", String(flippedPrinting ? "Enabled" : "Disabled")));
 }
 
 void handleToggleQRLink(){
+	const char* keyName = "printQRLinks";
 
-	
+	//Remember to change this to whatever file you want to store/read your custom config from
+	const char* file = "/config.json";
+
+	printQRLinks = !printQRLinks;
+
+	//save the key to flash and refresh data var with data from flash
+	addKey(keyName, printQRLinks ? (char*)"1" : (char*)"0" , file);
+
+	//tell the user that the config is loaded in and the module is restarting
+	server.send(200, "text/html",AFFIRM_REQ("QR Code printing has been ", String(printQRLinks ? "Enabled" : "Disabled")));
 }

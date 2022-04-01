@@ -6,6 +6,9 @@
 #include "ESPHelperFS.h"
 #include "ESPHelperWebConfig.h"
 
+
+
+
 //setup macros for time
 #define SECOND  1000L
 #define MINUTE  SECOND * 60L
@@ -14,6 +17,7 @@
 #define NETWORK_HOSTNAME "New-ESP"
 const char* HOSTNAME = NETWORK_HOSTNAME;
 
+void postDevicePing();
 bool loadConfig();
 void loadKey(const char* keyName, const char* filename, char* data, const uint16_t dataSize, const char* defaultData);
 void loadKey(const char* keyName, const char* filename, double *data);
@@ -38,7 +42,14 @@ int progModeCount = 0;
 netInfo config;
 ESPHelper myESP;
 
-ESP8266WebServer server(80);
+
+#ifdef ESP8266
+    ESP8266WebServer server(80);
+#endif
+#ifdef ESP32
+    WebServer server(80);
+#endif
+
 ESPHelperWebConfig configPage(&server, "/config");
 const char* configFileString = "/networkConfig.json";
 
@@ -58,7 +69,14 @@ netInfo defaultNet = {	.mqttHost = "",			//can be blank if not using MQTT
 
 
 
+void postDevicePing(){
+	String payload = "";
+	payload += String(myESP.getHostname()) + String(',');
+	payload += String(myESP.getIP()) + String(',');
+	payload += String(millis() / 1000);
 
+	myESP.publish("/home/deviceStatus", payload.c_str());
+}
 
 
 
